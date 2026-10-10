@@ -110,7 +110,8 @@ async function ciclo(previo) {
 
   // Latido: margen de 5 min porque GitHub no ejecuta exactamente a la hora.
   nuevo.ultimoLatido = previo.ultimoLatido || 0;
-  if (Date.now() - nuevo.ultimoLatido >= (LATIDO_MIN - 5) * 60000) {
+  // Las ejecuciones manuales (botón "Run workflow") siempre envían el latido.
+  if (process.env.FORZAR_LATIDO === 'true' || Date.now() - nuevo.ultimoLatido >= (LATIDO_MIN - 5) * 60000) {
     const hora = new Date().toLocaleTimeString('es-ES', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
     const txt = { sin_citas: 'sin citas por ahora', hay_citas: `HAY CITAS (${res.mes}/${res.ano})` }[res.estado] || `error: ${res.detalle}`;
     if (await telegram(`💚 PF Alerta sigue vivo\nÚltima consulta ${hora} (Brasília): ${txt}`, { silencioso: true })) nuevo.ultimoLatido = Date.now();

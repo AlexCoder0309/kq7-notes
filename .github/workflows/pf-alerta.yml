@@ -24,6 +24,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORZAR_LATIDO: ${{ github.event_name == 'workflow_dispatch' }}
 
       - name: Guardar estado si ha cambiado
         run: |

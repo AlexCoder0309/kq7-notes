@@ -1,8 +1,9 @@
 name: PF Alerta de citas
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'   # cada 5 min (GitHub puede retrasarlo algunos minutos)
+  # El horario automático corre en alwaysdata (cada 5 min). Para volver a GitHub:
+  # schedule:
+  #   - cron: '*/5 * * * *'
   workflow_dispatch:        # botón "Run workflow" (manual) o cron-job.org (origen=cron)
     inputs:
       origen:

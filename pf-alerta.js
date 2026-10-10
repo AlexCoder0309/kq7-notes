@@ -167,7 +167,8 @@ async function ciclo(previo) {
   return e;
 }
 
-(async () => {
+module.exports = { ciclo };
+if (require.main === module) (async () => {
   if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
     console.log('⚠️  Faltan las variables de entorno TELEGRAM_TOKEN y TELEGRAM_CHAT_ID.');
     process.exit(1);

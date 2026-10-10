@@ -3,7 +3,12 @@ name: PF Alerta de citas
 on:
   schedule:
     - cron: '*/5 * * * *'   # cada 5 min (GitHub puede retrasarlo algunos minutos)
-  workflow_dispatch:        # botón "Run workflow" para lanzarlo a mano
+  workflow_dispatch:        # botón "Run workflow" (manual) o cron-job.org (origen=cron)
+    inputs:
+      origen:
+        description: "manual o cron"
+        default: "manual"
+        required: false
 
 permissions:
   contents: write           # para guardar estado.json
@@ -24,7 +29,8 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          FORZAR_LATIDO: ${{ github.event_name == 'workflow_dispatch' }}
+          FORZAR_LATIDO: ${{ github.event_name == 'workflow_dispatch' && inputs.origen != 'cron' }}
+          ORIGEN: ${{ inputs.origen }}
 
       - name: Guardar estado si ha cambiado
         run: |

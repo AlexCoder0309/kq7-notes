@@ -132,8 +132,8 @@ async function ciclo(previo) {
   const e = { ...previo };
   await leerBotones(e);
 
-  // Primera ejecución automática de GitHub (cron): confirmar que el horario ya funciona.
-  if (process.env.GITHUB_EVENT_NAME === 'schedule' && !e.automaticoOk) {
+  // Primera ejecución automática (horario de GitHub o cron-job.org): confirmar que ya funciona.
+  if ((process.env.GITHUB_EVENT_NAME === 'schedule' || process.env.ORIGEN === 'cron') && !e.automaticoOk) {
     if (await telegram('🟢 <b>¡La ejecución automática ya está funcionando!</b>\nGitHub consultará las citas cada ~5 min sin que hagas nada.', { html: true })) e.automaticoOk = true;
   }
 

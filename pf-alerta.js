@@ -6,6 +6,10 @@
 //
 // TELEGRAM_TOKEN y TELEGRAM_CHAT_ID se leen de variables de entorno
 // (en GitHub: Settings > Secrets and variables > Actions). No los escribas en este archivo.
+//
+// Botones del aviso (se leen en la siguiente consulta):
+//   ✅ Ya lo sé     -> deja de insistir con estas citas (vuelve a avisar si cambian o aparecen nuevas)
+//   🎉 Ya reservé   -> pausa todos los avisos (botón ▶️ Reanudar para volver)
 
 const fs = require('fs');
 const path = require('path');
@@ -25,24 +29,34 @@ const URL_AGENDA = 'https://servicos.pf.gov.br/agenda-web/acessar';
 const ARCHIVO_ESTADO = path.join(__dirname, 'estado.json');
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
-const log = (...a) => console.log(new Date().toISOString(), ...a);
+const BOTONES_CITA = [[
+  { text: '✅ Ya lo sé', callback_data: 'ack' },
+  { text: '🎉 Ya reservé (pausar)', callback_data: 'pausa' },
+]];
+const BOTON_REANUDAR = [[{ text: '▶️ Reanudar avisos', callback_data: 'reanudar' }]];
 
-// opts: { html: true } para negrita, { silencioso: true } para que no suene el móvil
+const log = (...a) => console.log(new Date().toISOString(), ...a);
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function tgApi(method, payload) {
+  const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return r.json();
+}
+
+// opts: { html, silencioso, botones }
 async function telegram(text, opts = {}) {
   const body = { chat_id: TELEGRAM_CHAT_ID, text, disable_web_page_preview: true };
   if (opts.html) body.parse_mode = 'HTML';
   if (opts.silencioso) body.disable_notification = true;
-  const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const d = await r.json();
+  if (opts.botones) body.reply_markup = { inline_keyboard: opts.botones };
+  const d = await tgApi('sendMessage', body);
   if (!d.ok) log('❌ Error de Telegram:', d.description);
   return d.ok;
 }
-
-const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Aviso de citas: mensaje grande + 2 avisos extra para que el móvil suene varias veces.
 async function avisarCitas(mes, prueba = false) {
@@ -53,14 +67,44 @@ async function avisarCitas(mes, prueba = false) {
     `<b>📅 Primer mes con citas: ${mes.toUpperCase()}</b>\n` +
     `🏢 DELEMIG Curitiba · Primer RNM\n\n` +
     `<b>👉 ENTRA YA Y AGENDA:</b>\n${URL_AGENDA}\n\n` +
-    `🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨`,
-    { html: true },
+    `🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨\n\n` +
+    `<i>Te seguiré avisando hasta que pulses un botón.</i>`,
+    { html: true, botones: BOTONES_CITA },
   );
   for (const extra of ['⏰⏰⏰ <b>¡CITA DISPONIBLE! ENTRA YA</b> ⏰⏰⏰', '🔴🔴🔴 <b>¡CORRE, QUE SE ACABAN!</b> 🔴🔴🔴']) {
     await esperar(4000);
-    await telegram(p + extra, { html: true });
+    await telegram(p + extra, { html: true, botones: BOTONES_CITA });
   }
   return ok;
+}
+
+// Lee los botones pulsados desde la última consulta y actualiza el estado.
+async function leerBotones(e) {
+  let d;
+  try {
+    d = await tgApi('getUpdates', { offset: (e.ultimoUpdate || 0) + 1, timeout: 0, allowed_updates: ['callback_query'] });
+  } catch (err) { log('No se pudieron leer los botones:', err.message); return; }
+  if (!d.ok) { log('No se pudieron leer los botones:', d.description); return; }
+
+  for (const u of d.result) {
+    e.ultimoUpdate = u.update_id;
+    const q = u.callback_query;
+    if (!q || !q.message || String(q.message.chat.id) !== String(TELEGRAM_CHAT_ID)) continue;
+    tgApi('answerCallbackQuery', { callback_query_id: q.id, text: '👍 Recibido' }).catch(() => {});
+    log('Botón pulsado:', q.data);
+
+    if (q.data === 'ack' && !e.confirmado && !e.pausado) {
+      e.confirmado = true;
+      await telegram('👍 Vale, dejo de insistir con estas citas.\nTe avisaré si cambian o aparecen nuevas.');
+    } else if (q.data === 'pausa' && !e.pausado) {
+      e.pausado = true;
+      await telegram('🎉 ¡Enhorabuena por la cita! Avisos de citas PAUSADOS.\nSeguiré mandando el 💚 cada hora. Pulsa el botón para volver a vigilar.', { botones: BOTON_REANUDAR });
+    } else if (q.data === 'reanudar' && e.pausado) {
+      e.pausado = false;
+      e.confirmado = false;
+      await telegram('▶️ Avisos REANUDADOS. Vuelvo a vigilar las citas.');
+    }
+  }
 }
 
 // 404 = sin citas | 200 con {ano, mes} = hay citas a partir de ese mes
@@ -76,7 +120,7 @@ async function consultar() {
   return { estado: 'sin_citas' };
 }
 
-// Estado: { estado, mes, ano, ultimoAviso, errores }
+// Estado: { estado, mes, ano, ultimoAviso, errores, ultimoLatido, ultimoUpdate, confirmado, pausado }
 function leerEstado() {
   try { return JSON.parse(fs.readFileSync(ARCHIVO_ESTADO, 'utf8')); } catch { return {}; }
 }
@@ -85,38 +129,42 @@ function guardarEstado(e) {
 }
 
 async function ciclo(previo) {
-  let res;
-  try { res = await consultar(); } catch (e) { res = { estado: 'error', detalle: e.message }; }
-  log(res.estado, res.mes ? `${res.mes}/${res.ano}` : '', res.detalle || '');
+  const e = { ...previo };
+  await leerBotones(e);
 
-  const nuevo = { estado: res.estado, mes: res.mes, ano: res.ano, ultimoAviso: previo.ultimoAviso || 0, errores: 0 };
+  let res;
+  try { res = await consultar(); } catch (err) { res = { estado: 'error', detalle: err.message }; }
+  log(res.estado, res.mes ? `${res.mes}/${res.ano}` : '', res.detalle || '', e.pausado ? '(pausado)' : '', e.confirmado ? '(confirmado)' : '');
 
   if (res.estado === 'hay_citas') {
-    const cambio = previo.estado !== 'hay_citas' || previo.mes !== res.mes || previo.ano !== res.ano;
-    if (cambio || Date.now() - (previo.ultimoAviso || 0) >= RECORDAR_MIN * 60000) {
+    const cambio = e.estado !== 'hay_citas' || e.mes !== res.mes || e.ano !== res.ano;
+    if (cambio) e.confirmado = false; // citas nuevas o de otro mes: volver a insistir
+    Object.assign(e, { estado: res.estado, mes: res.mes, ano: res.ano, errores: 0 });
+    const toca = cambio || Date.now() - (e.ultimoAviso || 0) >= RECORDAR_MIN * 60000;
+    if (!e.pausado && !e.confirmado && toca) {
       const mes = res.mes ? `${MESES[res.mes - 1] || res.mes} ${res.ano || ''}` : '¿?';
-      if (await avisarCitas(mes)) {
-        nuevo.ultimoAviso = Date.now();
-      }
+      if (await avisarCitas(mes)) e.ultimoAviso = Date.now();
     }
   } else if (res.estado === 'sin_citas') {
-    nuevo.ultimoAviso = 0;
-    if (previo.estado === 'hay_citas') await telegram('ℹ️ Las citas ya no aparecen disponibles. Sigo vigilando.');
+    if (e.estado === 'hay_citas' && !e.pausado) await telegram('ℹ️ Las citas ya no aparecen disponibles. Sigo vigilando.');
+    Object.assign(e, { estado: res.estado, errores: 0, ultimoAviso: 0, confirmado: false });
+    delete e.mes; delete e.ano;
   } else {
     // En error conservamos el último estado conocido para no generar avisos falsos.
-    Object.assign(nuevo, { estado: previo.estado, mes: previo.mes, ano: previo.ano, errores: (previo.errores || 0) + 1 });
-    if (nuevo.errores === 3) await telegram(`⚠️ PF Alerta: no puedo consultar la web de la PF (${res.detalle}). Revisa el script.`);
+    e.errores = (e.errores || 0) + 1;
+    if (e.errores === 3) await telegram(`⚠️ PF Alerta: no puedo consultar la web de la PF (${res.detalle}). Revisa el script.`);
   }
 
   // Latido: margen de 5 min porque GitHub no ejecuta exactamente a la hora.
-  nuevo.ultimoLatido = previo.ultimoLatido || 0;
-  // Las ejecuciones manuales (botón "Run workflow") siempre envían el latido.
-  if (process.env.FORZAR_LATIDO === 'true' || Date.now() - nuevo.ultimoLatido >= (LATIDO_MIN - 5) * 60000) {
+  // Las ejecuciones manuales (botón "Run workflow") siempre lo envían.
+  if (process.env.FORZAR_LATIDO === 'true' || Date.now() - (e.ultimoLatido || 0) >= (LATIDO_MIN - 5) * 60000) {
     const hora = new Date().toLocaleTimeString('es-ES', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
     const txt = { sin_citas: 'sin citas por ahora', hay_citas: `HAY CITAS (${res.mes}/${res.ano})` }[res.estado] || `error: ${res.detalle}`;
-    if (await telegram(`💚 PF Alerta sigue vivo\nÚltima consulta ${hora} (Brasília): ${txt}`, { silencioso: true })) nuevo.ultimoLatido = Date.now();
+    const pausa = e.pausado ? '\n⏸️ Avisos de citas pausados' : '';
+    if (await telegram(`💚 PF Alerta sigue vivo\nÚltima consulta ${hora} (Brasília): ${txt}${pausa}`,
+      { silencioso: true, botones: e.pausado ? BOTON_REANUDAR : undefined })) e.ultimoLatido = Date.now();
   }
-  return nuevo;
+  return e;
 }
 
 (async () => {
@@ -127,7 +175,7 @@ async function ciclo(previo) {
   if (process.argv.includes('--test')) {
     const ok = await telegram('👋 Prueba de PF Alerta: ¡las notificaciones funcionan!');
     log(ok ? '✅ Mensaje de prueba enviado' : '❌ No se pudo enviar');
-    log('Consulta PF:', JSON.stringify(await consultar().catch((e) => ({ estado: 'error', detalle: e.message }))));
+    log('Consulta PF:', JSON.stringify(await consultar().catch((err) => ({ estado: 'error', detalle: err.message }))));
     return;
   }
   if (process.argv.includes('--demo')) {

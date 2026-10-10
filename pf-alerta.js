@@ -16,7 +16,7 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 const ID_UNIDADE = process.env.ID_UNIDADE || '183';        // DELEMIG/DREX/SR/PF/PR - Curitiba
 const ID_TIPO_SERVICO = process.env.ID_TIPO_SERVICO || '2'; // 1 = Solicitação de Refúgio, 2 = Requerimentos Diversos (renovação, 1º RNM, correção)
 const INTERVALO_MIN = 5;   // modo bucle: cada cuántos minutos consultar
-const RECORDAR_MIN = 30;   // si siguen habiendo citas, repetir aviso cada X minutos
+const RECORDAR_MIN = 0;    // si siguen habiendo citas, repetir aviso cada X minutos (0 = en cada consulta)
 const LATIDO_MIN = 60;     // mensaje "sigo vivo" cada X minutos
 // =========================
 

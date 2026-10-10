@@ -2,7 +2,7 @@ name: PF Alerta de citas
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # cada 30 min (repo privado: 2000 min/mes gratis; GitHub puede retrasarlo algunos minutos)
+    - cron: '*/5 * * * *'   # cada 5 min (GitHub puede retrasarlo algunos minutos)
   workflow_dispatch:        # botón "Run workflow" para lanzarlo a mano
 
 permissions:

@@ -1,9 +1,9 @@
 {
-  "estado": "sin_citas",
-  "ultimoAviso": 0,
-  "errores": 0,
-  "ultimoLatido": 1791649011013,
-  "ultimoUpdate": 335047546,
-  "pausado": true,
-  "confirmado": false
+    "estado":  "sin_citas",
+    "ultimoAviso":  0,
+    "errores":  0,
+    "ultimoLatido":  1791649011013,
+    "ultimoUpdate":  335047546,
+    "pausado":  false,
+    "confirmado":  false
 }

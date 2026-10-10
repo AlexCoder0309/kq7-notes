@@ -16,6 +16,7 @@ const ID_UNIDADE = process.env.ID_UNIDADE || '183';        // DELEMIG/DREX/SR/PF
 const ID_TIPO_SERVICO = process.env.ID_TIPO_SERVICO || '2'; // 1 = Solicitação de Refúgio, 2 = Requerimentos Diversos (renovação, 1º RNM, correção)
 const INTERVALO_MIN = 5;   // modo bucle: cada cuántos minutos consultar
 const RECORDAR_MIN = 30;   // si siguen habiendo citas, repetir aviso cada X minutos
+const LATIDO_MIN = 60;     // mensaje "sigo vivo" cada X minutos
 // =========================
 
 const URL_PF = `https://servicos.pf.gov.br/agenda-publico-rest/api/unidades/posto-configurado-agenda/${ID_UNIDADE}/${ID_TIPO_SERVICO}`;
@@ -79,6 +80,14 @@ async function ciclo(previo) {
     // En error conservamos el último estado conocido para no generar avisos falsos.
     Object.assign(nuevo, { estado: previo.estado, mes: previo.mes, ano: previo.ano, errores: (previo.errores || 0) + 1 });
     if (nuevo.errores === 3) await telegram(`⚠️ PF Alerta: no puedo consultar la web de la PF (${res.detalle}). Revisa el script.`);
+  }
+
+  // Latido: margen de 5 min porque GitHub no ejecuta exactamente a la hora.
+  nuevo.ultimoLatido = previo.ultimoLatido || 0;
+  if (Date.now() - nuevo.ultimoLatido >= (LATIDO_MIN - 5) * 60000) {
+    const hora = new Date().toLocaleTimeString('es-ES', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+    const txt = { sin_citas: 'sin citas por ahora', hay_citas: `HAY CITAS (${res.mes}/${res.ano})` }[res.estado] || `error: ${res.detalle}`;
+    if (await telegram(`💚 PF Alerta sigue vivo\nÚltima consulta ${hora} (Brasília): ${txt}`)) nuevo.ultimoLatido = Date.now();
   }
   return nuevo;
 }

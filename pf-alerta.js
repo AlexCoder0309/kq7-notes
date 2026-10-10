@@ -2,6 +2,7 @@
 // Uso:  node pf-alerta.js          -> vigila en bucle (en tu PC)
 //       node pf-alerta.js --once   -> una sola consulta (GitHub Actions)
 //       node pf-alerta.js --test   -> mensaje de prueba a Telegram + 1 consulta
+//       node pf-alerta.js --demo   -> envía un aviso de citas de ejemplo (marcado como PRUEBA)
 //
 // TELEGRAM_TOKEN y TELEGRAM_CHAT_ID se leen de variables de entorno
 // (en GitHub: Settings > Secrets and variables > Actions). No los escribas en este archivo.
@@ -26,15 +27,40 @@ const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', '
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
-async function telegram(text) {
+// opts: { html: true } para negrita, { silencioso: true } para que no suene el móvil
+async function telegram(text, opts = {}) {
+  const body = { chat_id: TELEGRAM_CHAT_ID, text, disable_web_page_preview: true };
+  if (opts.html) body.parse_mode = 'HTML';
+  if (opts.silencioso) body.disable_notification = true;
   const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }),
+    body: JSON.stringify(body),
   });
   const d = await r.json();
   if (!d.ok) log('❌ Error de Telegram:', d.description);
   return d.ok;
+}
+
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Aviso de citas: mensaje grande + 2 avisos extra para que el móvil suene varias veces.
+async function avisarCitas(mes, prueba = false) {
+  const p = prueba ? '🧪 <b>ESTO ES UNA PRUEBA</b> 🧪\n\n' : '';
+  const ok = await telegram(
+    `${p}🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨\n\n` +
+    `<b>‼️ HAY CITAS EN LA POLÍCIA FEDERAL ‼️</b>\n\n` +
+    `<b>📅 Primer mes con citas: ${mes.toUpperCase()}</b>\n` +
+    `🏢 DELEMIG Curitiba · Primer RNM\n\n` +
+    `<b>👉 ENTRA YA Y AGENDA:</b>\n${URL_AGENDA}\n\n` +
+    `🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨`,
+    { html: true },
+  );
+  for (const extra of ['⏰⏰⏰ <b>¡CITA DISPONIBLE! ENTRA YA</b> ⏰⏰⏰', '🔴🔴🔴 <b>¡CORRE, QUE SE ACABAN!</b> 🔴🔴🔴']) {
+    await esperar(4000);
+    await telegram(p + extra, { html: true });
+  }
+  return ok;
 }
 
 // 404 = sin citas | 200 con {ano, mes} = hay citas a partir de ese mes
@@ -69,7 +95,7 @@ async function ciclo(previo) {
     const cambio = previo.estado !== 'hay_citas' || previo.mes !== res.mes || previo.ano !== res.ano;
     if (cambio || Date.now() - (previo.ultimoAviso || 0) >= RECORDAR_MIN * 60000) {
       const mes = res.mes ? `${MESES[res.mes - 1] || res.mes} ${res.ano || ''}` : '¿?';
-      if (await telegram(`🚨 ¡HAY CITAS en la Polícia Federal!\n\nPrimer mes con citas: ${mes}\n\nEntra YA y agenda:\n${URL_AGENDA}`)) {
+      if (await avisarCitas(mes)) {
         nuevo.ultimoAviso = Date.now();
       }
     }
@@ -87,7 +113,7 @@ async function ciclo(previo) {
   if (Date.now() - nuevo.ultimoLatido >= (LATIDO_MIN - 5) * 60000) {
     const hora = new Date().toLocaleTimeString('es-ES', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
     const txt = { sin_citas: 'sin citas por ahora', hay_citas: `HAY CITAS (${res.mes}/${res.ano})` }[res.estado] || `error: ${res.detalle}`;
-    if (await telegram(`💚 PF Alerta sigue vivo\nÚltima consulta ${hora} (Brasília): ${txt}`)) nuevo.ultimoLatido = Date.now();
+    if (await telegram(`💚 PF Alerta sigue vivo\nÚltima consulta ${hora} (Brasília): ${txt}`, { silencioso: true })) nuevo.ultimoLatido = Date.now();
   }
   return nuevo;
 }
@@ -101,6 +127,10 @@ async function ciclo(previo) {
     const ok = await telegram('👋 Prueba de PF Alerta: ¡las notificaciones funcionan!');
     log(ok ? '✅ Mensaje de prueba enviado' : '❌ No se pudo enviar');
     log('Consulta PF:', JSON.stringify(await consultar().catch((e) => ({ estado: 'error', detalle: e.message }))));
+    return;
+  }
+  if (process.argv.includes('--demo')) {
+    log(await avisarCitas('febrero 2027', true) ? '✅ Aviso de ejemplo enviado' : '❌ No se pudo enviar');
     return;
   }
   if (process.argv.includes('--once')) {

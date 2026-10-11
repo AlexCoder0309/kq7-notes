@@ -68,22 +68,30 @@ async function buscarHorarios(mes, ano, max = 3) {
   const URL_DIA = `https://servicos.pf.gov.br/agenda-publico-rest/api/data-bloqueada/horarios-dia/${ID_UNIDADE}/${ID_TIPO_SERVICO}/`;
   const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); // AAAA-MM-DD
   const diasMes = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
-  const encontrados = [];
-  for (let d = 1; d <= diasMes && encontrados.length < max; d++) {
+  const fechas = [];
+  for (let d = 1; d <= diasMes; d++) {
     const fecha = `${ano}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    if (fecha < hoy) continue;
+    if (fecha >= hoy) fechas.push(fecha);
+  }
+  const consultarDia = async (fecha) => {
     try {
       const r = await fetch(URL_DIA + fecha, { cache: 'no-store', headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (r.status !== 200) continue;
+      if (r.status !== 200) return null;
       const lista = await r.json();
       const horas = (Array.isArray(lista) ? lista : [])
         .filter((h) => (h.qtdVagaAgenda || 0) - (h.qtdVagasOcupadas || 0) > 0)
         .map((h) => h.inicioAgendaFormatado)
         .sort();
-      if (horas.length) encontrados.push({ fecha, horas });
-    } catch (err) { log('No se pudo consultar el día', fecha, err.message); }
+      return horas.length ? { fecha, horas } : null;
+    } catch (err) { log('No se pudo consultar el día', fecha, err.message); return null; }
+  };
+  // Una semana (7 días) a la vez: el mes entero se revisa en menos de 1 segundo.
+  const encontrados = [];
+  for (let i = 0; i < fechas.length && encontrados.length < max; i += 7) {
+    const semana = await Promise.all(fechas.slice(i, i + 7).map(consultarDia));
+    encontrados.push(...semana.filter(Boolean));
   }
-  return encontrados;
+  return encontrados.slice(0, max);
 }
 
 function textoHorarios(dias) {

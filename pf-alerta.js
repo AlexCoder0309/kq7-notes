@@ -59,13 +59,52 @@ async function telegram(text, opts = {}) {
 }
 
 // Aviso de citas: mensaje grande + 2 avisos extra para que el móvil suene varias veces.
-async function avisarCitas(mes, prueba = false) {
+const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+// Recorre los días del mes y devuelve los primeros `max` días con horarios libres:
+// [{ fecha: '2027-01-12', horas: ['09:00', '09:30'] }]. Usa la misma consulta que la web
+// al pinchar un día del calendario (no requiere captcha ni datos personales).
+async function buscarHorarios(mes, ano, max = 3) {
+  const URL_DIA = `https://servicos.pf.gov.br/agenda-publico-rest/api/data-bloqueada/horarios-dia/${ID_UNIDADE}/${ID_TIPO_SERVICO}/`;
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); // AAAA-MM-DD
+  const diasMes = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  const encontrados = [];
+  for (let d = 1; d <= diasMes && encontrados.length < max; d++) {
+    const fecha = `${ano}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (fecha < hoy) continue;
+    try {
+      const r = await fetch(URL_DIA + fecha, { cache: 'no-store', headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (r.status !== 200) continue;
+      const lista = await r.json();
+      const horas = (Array.isArray(lista) ? lista : [])
+        .filter((h) => (h.qtdVagaAgenda || 0) - (h.qtdVagasOcupadas || 0) > 0)
+        .map((h) => h.inicioAgendaFormatado)
+        .sort();
+      if (horas.length) encontrados.push({ fecha, horas });
+    } catch (err) { log('No se pudo consultar el día', fecha, err.message); }
+  }
+  return encontrados;
+}
+
+function textoHorarios(dias) {
+  if (!dias.length) return '🕐 <i>No pude ver los horarios exactos, entra a mirarlos.</i>\n\n';
+  const lineas = dias.map(({ fecha, horas }) => {
+    const [a, m, d] = fecha.split('-');
+    const dia = DIAS_SEMANA[new Date(`${fecha}T12:00:00Z`).getUTCDay()];
+    const lista = horas.length > 8 ? `${horas.slice(0, 8).join(', ')} (+${horas.length - 8} más)` : horas.join(', ');
+    return `• <b>${dia} ${d}/${m}/${a}</b>\n   🕐 ${lista}`;
+  });
+  return `<b>🗓️ DÍAS Y HORAS LIBRES:</b>\n${lineas.join('\n')}\n\n`;
+}
+
+async function avisarCitas(mes, prueba = false, dias = []) {
   const p = prueba ? '🧪 <b>ESTO ES UNA PRUEBA</b> 🧪\n\n' : '';
   const ok = await telegram(
     `${p}🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨\n\n` +
     `<b>‼️ HAY CITAS EN LA POLÍCIA FEDERAL ‼️</b>\n\n` +
     `<b>📅 Primer mes con citas: ${mes.toUpperCase()}</b>\n` +
     `🏢 DELEMIG Curitiba · Primer RNM\n\n` +
+    textoHorarios(dias) +
     `<b>👉 ENTRA YA Y AGENDA:</b>\n${URL_AGENDA}\n\n` +
     `🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨\n\n` +
     `<i>Te seguiré avisando hasta que pulses un botón.</i>`,
@@ -148,7 +187,9 @@ async function ciclo(previo) {
     const toca = cambio || Date.now() - (e.ultimoAviso || 0) >= RECORDAR_MIN * 60000;
     if (!e.pausado && !e.confirmado && toca) {
       const mes = res.mes ? `${MESES[res.mes - 1] || res.mes} ${res.ano || ''}` : '¿?';
-      if (await avisarCitas(mes)) e.ultimoAviso = Date.now();
+      const dias = await buscarHorarios(res.mes, res.ano);
+      log('Días con horarios libres:', JSON.stringify(dias));
+      if (await avisarCitas(mes, false, dias)) e.ultimoAviso = Date.now();
     }
   } else if (res.estado === 'sin_citas') {
     if (e.estado === 'hay_citas' && !e.pausado) await telegram('ℹ️ Las citas ya no aparecen disponibles. Sigo vigilando.');
@@ -185,7 +226,11 @@ if (require.main === module) (async () => {
     return;
   }
   if (process.argv.includes('--demo')) {
-    log(await avisarCitas('febrero 2027', true) ? '✅ Aviso de ejemplo enviado' : '❌ No se pudo enviar');
+    const ejemplo = [
+      { fecha: '2027-02-01', horas: ['09:00', '09:30', '14:00'] },
+      { fecha: '2027-02-04', horas: ['10:30'] },
+    ];
+    log(await avisarCitas('febrero 2027', true, ejemplo) ? '✅ Aviso de ejemplo enviado' : '❌ No se pudo enviar');
     return;
   }
   if (process.argv.includes('--once')) {
